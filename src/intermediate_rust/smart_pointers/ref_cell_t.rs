@@ -3,11 +3,8 @@ use std::io::Result;
 
 pub fn ref_cell_t() -> Result<()> {
     Ok({
-        // Set-up
-        let log_path = "NOT_EXIST";
-        log_path.as_file().delete()?;
-
-        let logger = FileLogger::new(log_path);
+        // deliberately attempt to write to a directory because we don't really want to write a file
+        let logger = FileLogger::new("."); // Is a directory (os error 21)
         let mut tracker = LimitTracker::new(&logger, 100);
         tracker.set_value(95);
     })
@@ -104,7 +101,9 @@ impl Messenger for FileLogger<'_> {
 ///     }
 /// }
 /// ```
-/// but struct LimitTracker.messenger was declared as &'a T instead of &'a mut T where T: Messenger trait and you have no access to modify the code.
+/// but struct `LimitTracker.messenger` was declared as `&'a T` instead
+/// of `&'a mut T` where T: `Messenger trait` and you have no access to
+/// modify the code.
 ///
 /// This is where `RefCell<T>` is useful.
 pub trait Messenger {
