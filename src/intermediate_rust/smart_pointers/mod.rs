@@ -3,10 +3,13 @@ use std::io::Result;
 mod box_t;
 mod rc_t;
 mod ref_cell_t;
+mod traits;
 
 #[allow(dead_code)]
 pub enum SmartPointer {
     Nothing,
+    Drop,
+    Deref,
     BoxT,
     RcT,
     RefCellT,
@@ -26,6 +29,8 @@ pub fn smart_pointer(smart_pointer: SmartPointer) -> Result<()> {
         SmartPointer::BoxT => box_t::box_t(),
         SmartPointer::RcT => rc_t::rc_t(),
         SmartPointer::RefCellT => ref_cell_t::ref_cell_t(),
+        SmartPointer::Deref => traits::deref::deref_trait(),
+        SmartPointer::Drop => traits::drop::drop_trait(),
         _ => Ok(()),
     }
 }

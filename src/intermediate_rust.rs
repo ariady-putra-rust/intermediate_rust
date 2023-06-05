@@ -17,7 +17,7 @@ pub fn run(intermediate_rust: IntermediateRust) -> Result<()> {
         IntermediateRust::Lambda => lambda::lambda(),
         IntermediateRust::ThreadAndMove => thread_and_move::main_thread(),
         IntermediateRust::SmartPointers => {
-            smart_pointers::smart_pointer(smart_pointers::SmartPointer::RcT)
+            smart_pointers::smart_pointer(smart_pointers::SmartPointer::Deref)
         }
         _ => Ok(()),
     }
