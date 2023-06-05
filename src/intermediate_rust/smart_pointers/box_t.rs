@@ -67,30 +67,49 @@ enum List<T> {
 // We now know that any `List` value will take up the size of a `T` plus the size of a box’s pointer data.
 // By using a box, we’ve broken the infinite, recursive chain,
 // so the compiler can figure out the size it needs to store a `List` value.
-impl<T: Copy> List<T> {
-    pub fn for_each(&self, f: impl Fn(T) -> ()) {
+impl<T> List<T> {
+    pub fn for_each(&self, f: impl Fn(&T) -> ()) {
         use List::*;
 
-        return match self {
-            Cons(t, next) => {
-                f(*t);
-                Self::for_each(next, f);
-            }
-            Nil => (),
-        };
+        if let Cons(t, next) = self {
+            f(t);
+            Self::for_each(next, f);
+        }
     }
 }
 fn enabling_recursive_types_with_boxes() -> Result<()> {
     Ok({
-        use List::*;
+        println!("i32");
+        {
+            use List::*;
 
-        let list = Box::new(Cons(1, Box::new(Cons(2, Box::new(Cons(3, Box::new(Nil)))))));
-        list.for_each(|i| println!("{i}"));
-        dbg!(&list);
+            let list = Box::new(Cons(1, Box::new(Cons(2, Box::new(Cons(3, Box::new(Nil)))))));
+            list.for_each(|i| println!("{}", 0 + *i));
+            dbg!(&list);
 
-        println!("do this twice to make sure nothing was moved");
-        list.for_each(|i| println!("{i}"));
-        dbg!(&list);
+            println!("do this twice to make sure nothing was moved");
+            list.for_each(|i| println!("{}", 0 + *i));
+            dbg!(&list);
+        }
+
+        println!("String");
+        {
+            use List::*;
+
+            let list = Box::new(Cons(
+                String::from("one"),
+                Box::new(Cons(
+                    String::from("two"),
+                    Box::new(Cons(String::from("three"), Box::new(Nil))),
+                )),
+            ));
+            list.for_each(|s| println!("{s}"));
+            dbg!(&list);
+
+            println!("do this twice to make sure nothing was moved");
+            list.for_each(|i| println!("{i}"));
+            dbg!(&list);
+        }
     })
     // Boxes provide only the indirection and heap allocation; they don’t have any other special capabilities.
     // They also don’t have the performance overhead that these special capabilities incur, so they can be useful

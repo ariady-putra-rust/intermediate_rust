@@ -38,22 +38,28 @@ enum List<T> {
     Cons(T, Rc<List<T>>),
     Nil,
 }
-impl<T: Copy> List<T> {
-    pub fn for_each(&self, f: impl Fn(T) -> ()) {
+impl<T> List<T> {
+    pub fn for_each(&self, f: impl Fn(&T) -> ()) {
         use List::*;
 
-        return match self {
-            Cons(t, next) => {
-                f(*t);
-                Self::for_each(next, f);
-            }
-            Nil => (),
-        };
+        if let Cons(t, next) = self {
+            f(t);
+            Self::for_each(next, f);
+        }
     }
 }
 fn using_rc_t_to_share_data() -> Result<()> {
     Ok({
         use List::*;
+
+        println!("String");
+        {
+            let s = Rc::new(Cons(
+                String::from("hello"),
+                Rc::new(Cons(String::from("world"), Rc::new(Nil))),
+            ));
+            s.for_each(|s| println!("{s}"));
+        }
 
         let a = Rc::new(Cons(5, Rc::new(Cons(10, Rc::new(Nil)))));
         println!("count after creating `a` = {}", Rc::strong_count(&a));
