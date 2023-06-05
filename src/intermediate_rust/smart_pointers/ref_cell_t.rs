@@ -10,7 +10,7 @@
 //! involved is then wrapped in a safe API, and the outer type is still immutable.
 
 use file_access::AsFile;
-use std::io::Result;
+use std::{cell::RefCell, io::Result, rc::Rc};
 
 /// # Enforcing Borrowing Rules at Runtime with `RefCell<T>`
 /// With references and `Box<T>`, the borrowing rules’ invariants are enforced at compile time.
@@ -45,6 +45,8 @@ pub fn ref_cell_t() -> Result<()> {
         let logger = FileLogger::new("."); // Is a directory (os error 21)
         let mut tracker = LimitTracker::new(&logger, 100);
         tracker.set_value(95);
+
+        having_multiple_owners_of_mutable_data_by_combining_rc_t_and_ref_cell_t()?;
     })
 }
 struct FileLogger<'a> {
@@ -273,3 +275,83 @@ mod tests {
 // makes it possible to write a mock object that can modify itself to keep track of the messages it has
 // seen while you’re using it in a context where only immutable values are allowed. You can use `RefCell<T>`
 // despite its trade-offs to get more functionality than regular references provide.
+
+/// # Having Multiple Owners of Mutable Data by Combining `Rc<T>` and `RefCell<T>`
+/// A common way to use `RefCell<T>` is in combination with `Rc<T>`. Recall that `Rc<T>`
+/// lets you have multiple owners of some data, but it only gives immutable access to that data.
+/// If you have an `Rc<T>` that holds a `RefCell<T>`, you can get a value that can have multiple
+/// owners and that you can mutate!
+#[derive(Debug)]
+enum List<T> {
+    Cons(Rc<RefCell<T>>, Rc<List<T>>),
+    Nil,
+}
+impl<T> List<T> {
+    pub fn for_each(&self, f: impl Fn(&T) -> ()) {
+        use List::*;
+
+        if let Cons(t, next) = self {
+            f(&t.borrow());
+            Self::for_each(next, f);
+        }
+    }
+}
+fn having_multiple_owners_of_mutable_data_by_combining_rc_t_and_ref_cell_t() -> Result<()> {
+    Ok({
+        println!("i32");
+        {
+            use List::*;
+
+            let value = Rc::new(RefCell::new(5));
+
+            let a = Rc::new(Cons(Rc::clone(&value), Rc::new(Nil)));
+
+            let b = Rc::new(Cons(Rc::new(RefCell::new(3)), Rc::clone(&a)));
+            let c = Rc::new(Cons(Rc::new(RefCell::new(4)), Rc::clone(&a)));
+
+            *value.borrow_mut() += 10;
+
+            a.for_each(|i| println!("a:{}", 0 + *i));
+            b.for_each(|i| println!("b:{}", 0 + *i));
+            c.for_each(|i| println!("c:{}", 0 + *i));
+
+            println!("a after = {:?}", a);
+            println!("b after = {:?}", b);
+            println!("c after = {:?}", c);
+        }
+
+        println!("String");
+        {
+            use List::*;
+
+            let value = Rc::new(RefCell::new(String::from("Rust")));
+
+            let a = Rc::new(Cons(Rc::clone(&value), Rc::new(Nil)));
+
+            let b = Rc::new(Cons(
+                Rc::new(RefCell::new(String::from("Hello"))),
+                Rc::clone(&a),
+            ));
+            let c = Rc::new(Cons(
+                Rc::new(RefCell::new(String::from("World"))),
+                Rc::clone(&a),
+            ));
+
+            value.borrow_mut().push_str("acean");
+
+            a.for_each(|s| println!("a:{s}"));
+            b.for_each(|s| println!("b:{s}"));
+            c.for_each(|s| println!("c:{s}"));
+
+            println!("a after = {:?}", a);
+            println!("b after = {:?}", b);
+            println!("c after = {:?}", c);
+        }
+    })
+}
+// This technique is pretty neat! By using `RefCell<T>`, we have an outwardly immutable `List` value.
+// But we can use the methods on `RefCell<T>` that provide access to its interior mutability so we
+// can modify our data when we need to. The runtime checks of the borrowing rules protect us from
+// data races, and it’s sometimes worth trading a bit of speed for this flexibility in our data
+// structures. Note that `RefCell<T>` does not work for multithreaded code! `Mutex<T>` is the thread-
+// safe version of `RefCell<T>`
