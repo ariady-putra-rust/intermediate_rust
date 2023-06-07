@@ -10,7 +10,11 @@
 //! involved is then wrapped in a safe API, and the outer type is still immutable.
 
 use file_access::AsFile;
-use std::{cell::RefCell, io::Result, rc::Rc};
+use std::{
+    cell::RefCell,
+    io::Result,
+    rc::{Rc, Weak},
+};
 
 /// # Enforcing Borrowing Rules at Runtime with `RefCell<T>`
 /// With references and `Box<T>`, the borrowing rules’ invariants are enforced at compile time.
@@ -47,6 +51,9 @@ pub fn ref_cell_t() -> Result<()> {
         tracker.set_value(95);
 
         having_multiple_owners_of_mutable_data_by_combining_rc_t_and_ref_cell_t()?;
+        reference_cycles_can_leak_memory()?;
+        creating_a_tree_data_structure_a_node_with_child_nodes()?;
+        visualizing_changes_to_strong_count_and_weak_count()?;
     })
 }
 struct FileLogger<'a> {
@@ -355,3 +362,160 @@ fn having_multiple_owners_of_mutable_data_by_combining_rc_t_and_ref_cell_t() -> 
 // data races, and it’s sometimes worth trading a bit of speed for this flexibility in our data
 // structures. Note that `RefCell<T>` does not work for multithreaded code! `Mutex<T>` is the thread-
 // safe version of `RefCell<T>`
+
+/// # Reference Cycles Can Leak Memory
+/// Rust’s memory safety guarantees make it difficult, but not impossible,
+/// to accidentally create memory that is never cleaned up (known as a _memory leak_).
+/// Preventing memory leaks entirely is not one of Rust’s guarantees,
+/// meaning memory leaks are memory safe in Rust.
+/// We can see that Rust allows memory leaks by using `Rc<T>` and `RefCell<T>`:
+/// it’s possible to create references where items refer to each other in a cycle.
+/// This creates memory leaks because the reference count of each item in the cycle will never reach 0,
+/// and the values will never be dropped.
+fn reference_cycles_can_leak_memory() -> Result<()> {
+    Ok({
+        use CyclicList::*;
+
+        println!("Reference Cycles Can Leak Memory");
+
+        let a = Rc::new(Cons(5, RefCell::new(Rc::new(Nil))));
+
+        println!("a initial rc count = {}", Rc::strong_count(&a));
+        println!("a next item = {:?}", a.tail());
+
+        let b = Rc::new(Cons(10, RefCell::new(Rc::clone(&a))));
+
+        println!("a rc count after b creation = {}", Rc::strong_count(&a));
+        println!("b initial rc count = {}", Rc::strong_count(&b));
+        println!("b next item = {:?}", b.tail());
+
+        if let Some(link) = a.tail() {
+            *link.borrow_mut() = Rc::clone(&b);
+        }
+
+        println!("b rc count after changing a = {}", Rc::strong_count(&b));
+        println!("a rc count after changing a = {}", Rc::strong_count(&a));
+
+        // Uncomment the next line to see that we have a cycle;
+        // it will overflow the stack
+        // println!("a next item = {:?}", a.tail());
+    })
+}
+#[derive(Debug)]
+enum CyclicList<T> {
+    Cons(T, RefCell<Rc<CyclicList<T>>>),
+    Nil,
+}
+impl<T> CyclicList<T> {
+    pub fn tail(&self) -> Option<&RefCell<Rc<CyclicList<T>>>> {
+        use CyclicList::*;
+
+        return match self {
+            Cons(_, tail) => Some(tail),
+            Nil => None,
+        };
+    }
+}
+
+/// # Creating a Tree Data Structure: a Node with Child Nodes
+#[derive(Debug)]
+struct TreeNode<T> {
+    value: T,
+    children: RefCell<Vec<Rc<TreeNode<T>>>>,
+    //
+    // To make the child node aware of its parent,
+    // we need to add a `parent` field to our Node struct definition.
+    // The trouble is in deciding what the type of parent should be.
+    // We know it can’t contain an `Rc<T>`,
+    // because that would create a reference cycle with `leaf.parent` pointing to
+    // `branch` and `branch.children` pointing to `leaf`,
+    // which would cause their `strong_count` values to never be 0.
+    parent: RefCell<Weak<TreeNode<T>>>, // # Add a Reference from a Child to Its Parent
+                                        // Thinking about the relationships another way,
+                                        // a parent node should own its children: if a
+                                        // parent node is dropped, its child nodes should
+                                        // be dropped as well. However, a child should
+                                        // not own its parent: if we drop a child node,
+                                        // the parent should still exist. This is a case
+                                        // for weak references!
+}
+impl<T> TreeNode<T> {
+    pub fn for_each(&self, f: &impl Fn(&T) -> ()) {
+        f(&self.value);
+        for child in &*self.children.borrow() {
+            Self::for_each(child, f);
+        }
+    }
+}
+fn creating_a_tree_data_structure_a_node_with_child_nodes() -> Result<()> {
+    Ok({
+        println!("Creating a Tree Data Structure: a Node with Child Nodes");
+
+        let leaf = Rc::new(TreeNode {
+            value: 3,
+            children: RefCell::new(vec![]),
+            parent: RefCell::new(Weak::new()),
+        });
+
+        println!("leaf parent = {:?}", leaf.parent.borrow().upgrade());
+
+        let branch = Rc::new(TreeNode {
+            value: 5,
+            children: RefCell::new(vec![Rc::clone(&leaf)]),
+            parent: RefCell::new(Weak::new()),
+        });
+
+        branch.for_each(&|i| print!(" {{{}}} ", 0 + i));
+        println!();
+
+        *leaf.parent.borrow_mut() = Rc::downgrade(&branch);
+
+        println!("leaf parent = {:?}", leaf.parent.borrow().upgrade());
+    })
+}
+fn visualizing_changes_to_strong_count_and_weak_count() -> Result<()> {
+    Ok({
+        println!("Visualizing Changes to strong_count and weak_count");
+
+        let leaf = Rc::new(TreeNode {
+            value: 3,
+            parent: RefCell::new(Weak::new()),
+            children: RefCell::new(vec![]),
+        });
+
+        println!(
+            "leaf strong = {}, weak = {}",
+            Rc::strong_count(&leaf),
+            Rc::weak_count(&leaf),
+        );
+
+        {
+            let branch = Rc::new(TreeNode {
+                value: 5,
+                parent: RefCell::new(Weak::new()),
+                children: RefCell::new(vec![Rc::clone(&leaf)]),
+            });
+
+            *leaf.parent.borrow_mut() = Rc::downgrade(&branch);
+
+            println!(
+                "branch strong = {}, weak = {}",
+                Rc::strong_count(&branch),
+                Rc::weak_count(&branch),
+            );
+
+            println!(
+                "leaf strong = {}, weak = {}",
+                Rc::strong_count(&leaf),
+                Rc::weak_count(&leaf),
+            );
+        }
+
+        println!("leaf parent = {:?}", leaf.parent.borrow().upgrade());
+        println!(
+            "leaf strong = {}, weak = {}",
+            Rc::strong_count(&leaf),
+            Rc::weak_count(&leaf),
+        );
+    })
+}
